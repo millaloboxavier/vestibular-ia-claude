@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { HistorySummaryGate } from "@/components/HistorySummaryGate";
 
 /**
  * HistoryDrawer — gaveta lateral com as perguntas já respondidas nesta
@@ -27,7 +28,7 @@ export function HistoryDrawer({ open, onClose, history, activeId, onSelect }) {
         </div>
         <p className="mt-1 text-sm text-muted-foreground">Volte para qualquer resposta anterior sem perguntar de novo.</p>
 
-        <div className="mt-5 flex flex-col gap-2 overflow-y-auto" style={{ maxHeight: "calc(100vh - 140px)" }}>
+        <div className="mt-5 flex flex-col gap-2 overflow-y-auto" style={{ maxHeight: "calc(100vh - 340px)" }}>
           {history.length === 0 ? (
             <p className="text-sm text-muted-foreground">Nenhuma pergunta ainda.</p>
           ) : (
@@ -48,6 +49,8 @@ export function HistoryDrawer({ open, onClose, history, activeId, onSelect }) {
             ))
           )}
         </div>
+
+        <HistorySummaryGate history={history} />
       </aside>
     </div>
   );
