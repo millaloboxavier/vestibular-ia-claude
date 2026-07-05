@@ -284,11 +284,7 @@ function matchAdmissionTypes(message, ids = []) {
   if (q.includes("demanda")) return all.filter((item) => normalize(item.label || item.name || "").includes("demanda"));
   if (q.includes("olimpiada") || q.includes("olimpíada")) return all.filter((item) => normalize(item.label || item.name || "").includes("olimpi"));
 
-  if (sig.asksAdmission || /formas de ingresso|modalidades|opcoes de ingresso|opções de ingresso/.test(q)) return all.slice(0, 6);
-  if (sig.asksDate) {
-    const item = all.find((admission) => admission.id === "vestibular-fgv");
-    return item ? [item] : all.slice(0, 1);
-  }
+  if (sig.asksAdmission || sig.asksDate || /formas de ingresso|modalidades|opcoes de ingresso|opções de ingresso/.test(q)) return all.slice(0, 6);
   return [];
 }
 
