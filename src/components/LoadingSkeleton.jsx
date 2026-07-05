@@ -91,10 +91,29 @@ const BODY_BY_LAYOUT = {
   list: ListSkeleton
 };
 
+function ThinkingStatus() {
+  return (
+    <div className="rounded-3xl border border-border bg-card p-6">
+      <div className="flex items-center gap-3 text-lg font-bold">
+        <span className="h-3 w-3 animate-pulse rounded-full bg-foreground" />
+        Organizando sua jornada.
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2 text-sm text-muted-foreground">
+        <span className="rounded-full border border-border bg-secondary px-3 py-1.5">entendendo o que você precisa</span>
+        <span className="rounded-full border border-border bg-secondary px-3 py-1.5">identificando curso, cidade e momento</span>
+        <span className="rounded-full border border-border bg-secondary px-3 py-1.5">organizando os próximos caminhos</span>
+      </div>
+    </div>
+  );
+}
+
 /**
  * LoadingSkeleton — substitui o spinner genérico. O formato do corpo
  * (grid/tabela/lista) é escolhido por guessLayout() a partir da pergunta,
  * para que o esqueleto já sugira o tipo de resposta que está a caminho.
+ * O bloco "Organizando sua jornada" continua no topo, dando contexto em
+ * texto do que está acontecendo, enquanto o skeleton dá a expectativa
+ * visual do formato que está por vir.
  */
 export function LoadingSkeleton({ query = "" }) {
   const layout = guessLayout(query);
@@ -102,6 +121,7 @@ export function LoadingSkeleton({ query = "" }) {
 
   return (
     <div className="mt-8 flex flex-col gap-6" aria-busy="true" aria-live="polite">
+      <ThinkingStatus />
       <AnswerSkeleton />
       <Body />
     </div>
