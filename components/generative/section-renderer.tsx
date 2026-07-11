@@ -275,24 +275,38 @@ function DetailSection({ section }: { section: Section }) {
   );
 }
 
+function ScrollHintTable({ children }: { children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="relative">
+        {children}
+        <div className="pointer-events-none absolute inset-y-0 right-0 w-10 rounded-r-2xl bg-gradient-to-l from-background to-transparent md:hidden" />
+      </div>
+      <p className="mt-1.5 text-xs text-muted-foreground md:hidden">Arraste para o lado →</p>
+    </div>
+  );
+}
+
 function ItemTable({ table }: { table: { columns: string[]; rows: string[][] } }) {
   return (
-    <div className="overflow-x-auto rounded-2xl border">
-      <table className="w-full min-w-[560px] text-left text-sm">
-        <thead className="bg-muted">
-          <tr>
-            {table.columns.map((column) => <th key={column} className="p-3 font-medium">{column}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {table.rows.map((row, rowIndex) => (
-            <tr key={rowIndex} className="border-t align-top">
-              {row.map((cell, cellIndex) => <td key={cellIndex} className="p-3">{cell}</td>)}
+    <ScrollHintTable>
+      <div className="overflow-x-auto rounded-2xl border">
+        <table className="w-full min-w-[560px] text-left text-sm">
+          <thead className="bg-muted">
+            <tr>
+              {table.columns.map((column) => <th key={column} className="p-3 font-medium">{column}</th>)}
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {table.rows.map((row, rowIndex) => (
+              <tr key={rowIndex} className="border-t align-top">
+                {row.map((cell, cellIndex) => <td key={cellIndex} className="p-3">{cell}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </ScrollHintTable>
   );
 }
 
@@ -401,32 +415,34 @@ function CompareSection({ section }: { section: Section }) {
   const items = safeItems(section);
   return (
     <SectionShell section={section}>
-      <div className="overflow-x-auto rounded-2xl border">
-        <table className="w-full min-w-[860px] text-left text-sm">
-          <thead className="bg-muted">
-            <tr>
-              <th className="p-4 font-medium">Curso</th>
-              <th className="p-4 font-medium">Cidade</th>
-              <th className="p-4 font-medium">Escola</th>
-              <th className="p-4 font-medium">Duração</th>
-              <th className="p-4 font-medium">Formas de ingresso</th>
-              <th className="p-4 font-medium">Áreas de atuação</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((course, index) => (
-              <tr key={course.id || index} className="border-t align-top">
-                <td className="p-4 font-semibold">{course.name || course.displayName}</td>
-                <td className="p-4">{course.city}</td>
-                <td className="p-4">{course.school}</td>
-                <td className="p-4">{course.duration || "—"}</td>
-                <td className="p-4">{Array.isArray(course.admissions) ? course.admissions.join(", ") : "—"}</td>
-                <td className="p-4">{Array.isArray(course.careerPaths) && course.careerPaths.length ? course.careerPaths.join(", ") : "—"}</td>
+      <ScrollHintTable>
+        <div className="overflow-x-auto rounded-2xl border">
+          <table className="w-full min-w-[860px] text-left text-sm">
+            <thead className="bg-muted">
+              <tr>
+                <th className="p-4 font-medium">Curso</th>
+                <th className="p-4 font-medium">Cidade</th>
+                <th className="p-4 font-medium">Escola</th>
+                <th className="p-4 font-medium">Duração</th>
+                <th className="p-4 font-medium">Formas de ingresso</th>
+                <th className="p-4 font-medium">Áreas de atuação</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {items.map((course, index) => (
+                <tr key={course.id || index} className="border-t align-top">
+                  <td className="p-4 font-semibold">{course.name || course.displayName}</td>
+                  <td className="p-4">{course.city}</td>
+                  <td className="p-4">{course.school}</td>
+                  <td className="p-4">{course.duration || "—"}</td>
+                  <td className="p-4">{Array.isArray(course.admissions) ? course.admissions.join(", ") : "—"}</td>
+                  <td className="p-4">{Array.isArray(course.careerPaths) && course.careerPaths.length ? course.careerPaths.join(", ") : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </ScrollHintTable>
     </SectionShell>
   );
 }

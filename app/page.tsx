@@ -2,11 +2,11 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, Bell, History, Loader2, Menu, Sparkles, X } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { ArrowUp, Bell, ChevronDown, Download, Loader2, Menu, MessageCircle, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { GenerativeSkeleton, Section, SectionRenderer, SkeletonVariant } from "@/components/generative/section-renderer";
+import { ChecklistCard, ChecklistStepId, JourneyChecklist, createChecklist, isChecklistComplete } from "@/components/journey/checklist-card";
 import siteData from "@/data/graduacao-content.json";
 
 const suggestions = [
@@ -50,6 +50,7 @@ const loadingSteps = [
 
 type Plan = {
   pageTitle?: string;
+  chatMessage?: string;
   answer?: string;
   intent?: string;
   entities?: any;
@@ -164,6 +165,14 @@ function normalize(text = "") {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .trim();
+}
+
+function detectChecklistStep(normalizedMessage: string): ChecklistStepId | null {
+  if (/(forma de ingresso|formas de ingresso|modalidade)/.test(normalizedMessage)) return "formaIngresso";
+  if (/edital/.test(normalizedMessage)) return "edital";
+  if (/(prova anterior|provas anteriores|gabarito)/.test(normalizedMessage)) return "provasAntigas";
+  if (/local de prova|locais de prova/.test(normalizedMessage)) return "locaisProva";
+  return null;
 }
 
 function inferSkeletonVariant(message: string): SkeletonVariant {
@@ -339,7 +348,7 @@ function buildPdfBlocks(journeys: JourneyItem[], leadName?: string): PdfBlock[] 
     blocks.push({ type: "divider" });
     blocks.push({ type: "h2", text: `${index + 1}. ${cleanPdfText(journey.title || journey.question)}` });
     blocks.push({ type: "small", text: `Pergunta: ${cleanPdfText(journey.question)}` });
-    if (journey.plan?.answer) pushParagraph(blocks, journey.plan.answer);
+    if (journey.plan?.chatMessage) pushParagraph(blocks, journey.plan.chatMessage);
     const sections = Array.isArray(journey.plan?.sections) ? journey.plan.sections : [];
     sections.forEach((section) => pushSection(blocks, section));
   });
@@ -520,9 +529,7 @@ function downloadBlob(blob: Blob, filename: string) {
 function JourneyDrawer({
   open,
   journeys,
-  activeId,
   onClose,
-  onSelect,
   onClear,
   leadName,
   leadEmail,
@@ -535,9 +542,7 @@ function JourneyDrawer({
 }: {
   open: boolean;
   journeys: JourneyItem[];
-  activeId?: string;
   onClose: () => void;
-  onSelect: (item: JourneyItem) => void;
   onClear: () => void;
   leadName: string;
   leadEmail: string;
@@ -556,38 +561,17 @@ function JourneyDrawer({
       <aside className={`absolute right-0 top-0 flex h-full w-full max-w-md flex-col border-l bg-background shadow-2xl transition-transform duration-300 ${open ? "translate-x-0" : "translate-x-full"}`}>
         <div className="flex items-start justify-between gap-4 border-b p-5">
           <div>
-            <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Histórico</p>
-            <h2 className="mt-1 text-xl font-semibold">Suas perguntas</h2>
-            <p className="mt-1 text-sm leading-5 text-muted-foreground">Volte para qualquer resposta anterior sem perguntar de novo.</p>
+            <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Resumo</p>
+            <h2 className="mt-1 text-xl font-semibold">Leve sua jornada com você</h2>
+            <p className="mt-1 text-sm leading-5 text-muted-foreground">A conversa inteira já fica ao lado — aqui você exporta um resumo dela.</p>
           </div>
-          <Button variant="ghost" size="icon" onClick={onClose} aria-label="Fechar histórico">
+          <Button variant="ghost" size="icon" onClick={onClose} aria-label="Fechar">
             <X className="h-5 w-5" />
           </Button>
         </div>
         <div className="flex-1 overflow-y-auto p-4">
           {journeys.length ? (
-            <div className="space-y-3">
-              {journeys.map((item, index) => (
-                <button
-                  key={item.id}
-                  onClick={() => onSelect(item)}
-                  className={`w-full rounded-2xl border p-4 text-left transition hover:bg-muted/70 ${item.id === activeId ? "border-foreground bg-muted" : "bg-background"}`}
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">#{journeys.length - index}</span>
-                    <span className="text-xs text-muted-foreground">{item.createdAt}</span>
-                  </div>
-                  <h3 className="mt-2 line-clamp-2 font-semibold">{item.title}</h3>
-                  <p className="mt-2 line-clamp-2 text-sm leading-5 text-muted-foreground">{item.question}</p>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div className="rounded-2xl border bg-muted/40 p-5 text-sm text-muted-foreground">As consultas feitas aparecerão aqui.</div>
-          )}
-
-          {journeys.length ? (
-            <div className="mt-6 rounded-2xl border border-dashed p-5">
+            <div className="rounded-2xl border border-dashed p-5">
               {!summaryUnlocked ? (
                 <form
                   className="space-y-3"
@@ -618,11 +602,13 @@ function JourneyDrawer({
                 </div>
               )}
             </div>
-          ) : null}
+          ) : (
+            <div className="rounded-2xl border bg-muted/40 p-5 text-sm text-muted-foreground">Comece uma conversa para poder exportar um resumo.</div>
+          )}
         </div>
         {journeys.length ? (
           <div className="border-t p-4">
-            <Button variant="outline" className="w-full" onClick={onClear}>Limpar histórico</Button>
+            <Button variant="outline" className="w-full" onClick={onClear}>Limpar conversa</Button>
           </div>
         ) : null}
       </aside>
@@ -712,7 +698,7 @@ export default function Page() {
   const [input, setInput] = useState("");
   const [currentQuestion, setCurrentQuestion] = useState("");
   const [plan, setPlan] = useState<Plan | null>(null);
-  const [streamingPreview, setStreamingPreview] = useState<{ pageTitle?: string; answer?: string } | null>(null);
+  const [streamingPreview, setStreamingPreview] = useState<{ pageTitle?: string; chatMessage?: string } | null>(null);
   const [aiOnly, setAiOnly] = useState(false);
   const [visibleCount, setVisibleCount] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -725,16 +711,26 @@ export default function Page() {
   const [leadEmail, setLeadEmail] = useState("");
   const [summaryUnlocked, setSummaryUnlocked] = useState(false);
   const [compareOpen, setCompareOpen] = useState(false);
+  const [checklist, setChecklist] = useState<JourneyChecklist | null>(null);
+  const [confirmDismissedFor, setConfirmDismissedFor] = useState<string | null>(null);
+  const [mobileChatOpen, setMobileChatOpen] = useState(true);
   const topRef = useRef<HTMLDivElement>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
   const isFirstJourneysWriteRef = useRef(true);
 
   const sections = useMemo(() => plan?.sections || [], [plan]);
   const admissionNotice = useMemo(() => upcomingAdmissionNotice(), []);
+  const activeCourseDetail = useMemo(() => {
+    const detail = plan?.sections?.find((section) => section.type === "course_detail");
+    return (detail as any)?.course || null;
+  }, [plan]);
 
   useEffect(() => {
     try {
       const stored = window.localStorage.getItem("vestibular-ia-journey");
       if (stored) setJourneys(JSON.parse(stored));
+      const storedChecklist = window.localStorage.getItem("vestibular-ia-checklist");
+      if (storedChecklist) setChecklist(JSON.parse(storedChecklist));
       const storedLead = window.localStorage.getItem("vestibular-ia-summary-lead");
       if (storedLead) {
         const parsed = JSON.parse(storedLead);
@@ -756,6 +752,10 @@ export default function Page() {
   }, [journeys]);
 
   useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+  }, [journeys, loading, streamingPreview]);
+
+  useEffect(() => {
     if (!sections.length) {
       setVisibleCount(0);
       return;
@@ -764,6 +764,61 @@ export default function Page() {
     const timers = sections.map((_, index) => window.setTimeout(() => setVisibleCount(index + 1), 240 + index * 260));
     return () => timers.forEach(window.clearTimeout);
   }, [sections]);
+
+  function saveChecklist(next: JourneyChecklist | null) {
+    setChecklist(next);
+    try {
+      if (next) window.localStorage.setItem("vestibular-ia-checklist", JSON.stringify(next));
+      else window.localStorage.removeItem("vestibular-ia-checklist");
+    } catch {}
+  }
+
+  function markChecklistStep(stepId: ChecklistStepId) {
+    setChecklist((prev) => {
+      if (!prev || prev.steps[stepId]) return prev;
+      const next = { ...prev, steps: { ...prev.steps, [stepId]: true } };
+      try {
+        window.localStorage.setItem("vestibular-ia-checklist", JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  }
+
+  function confirmCourse(course: any) {
+    const name = course.displayName || course.name || "esse curso";
+    saveChecklist(createChecklist(course.id, name, course.city));
+    setConfirmDismissedFor(course.id);
+
+    const steps = [
+      { label: "Ver formas de ingresso", prompt: `quais formas de ingresso existem para ${name} em ${course.city}?`, tone: "primary" },
+      { label: "Baixar o edital", prompt: "quero baixar o edital do Vestibular FGV" },
+      { label: "Estudar com provas anteriores", prompt: "quero estudar com provas anteriores do Vestibular FGV" },
+    ];
+
+    const item: JourneyItem = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      question: `Quero seguir com ${name} como minha opção`,
+      title: `${name} escolhido como sua opção`,
+      intent: "curso_confirmado",
+      createdAt: compactDateLabel(),
+      plan: {
+        pageTitle: "Ótima escolha!",
+        chatMessage: `Perfeito, vamos seguir com ${name}${course.city ? ` em ${course.city}` : ""}. Renderizei ao lado os próximos passos recomendados até a inscrição — pode clicar em qualquer um deles quando quiser, ou me perguntar outra coisa.`,
+        sections: [
+          {
+            type: "next_step",
+            title: "Próximos passos recomendados",
+            intro: "Você pode seguir por qualquer um desses caminhos quando quiser.",
+            layout: "chips",
+            items: steps,
+            actions: steps,
+          },
+        ],
+      },
+    };
+    setJourneys((previous) => [item, ...previous].slice(0, 12));
+    restoreJourney(item);
+  }
 
   async function submitQuestion(question: string) {
     const message = question.trim();
@@ -777,10 +832,17 @@ export default function Page() {
       return;
     }
 
-    const previousItem = journeys.find((entry) => entry.id === activeJourneyId);
-    const previousTurn = previousItem
-      ? { question: previousItem.question, answer: previousItem.plan.answer, intent: previousItem.plan.intent, entities: previousItem.plan.entities }
-      : undefined;
+    const checklistStep = detectChecklistStep(normalizedMessage);
+    if (checklistStep) markChecklistStep(checklistStep);
+
+    const activeIndex = journeys.findIndex((entry) => entry.id === activeJourneyId);
+    const contextJourneys = activeIndex === -1 ? [] : journeys.slice(activeIndex, activeIndex + 4);
+    const previousTurns = contextJourneys.map((entry) => ({
+      question: entry.question,
+      chatMessage: entry.plan?.chatMessage,
+      intent: entry.plan?.intent,
+      entities: entry.plan?.entities,
+    }));
 
     setError("");
     setLoading(true);
@@ -797,7 +859,7 @@ export default function Page() {
       const response = await fetch("/api/generate-ui", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, previousTurn, aiOnly }),
+        body: JSON.stringify({ message, previousTurns, aiOnly }),
       });
 
       const contentType = response.headers.get("content-type") || "";
@@ -827,7 +889,7 @@ export default function Page() {
 
           const event = JSON.parse(line);
           if (event.phase === "partial") {
-            setStreamingPreview({ pageTitle: event.pageTitle, answer: event.answer });
+            setStreamingPreview({ pageTitle: event.pageTitle, chatMessage: event.chatMessage });
           } else if (event.phase === "final") {
             finalData = event;
           } else if (event.phase === "error") {
@@ -897,7 +959,7 @@ export default function Page() {
     const shortText = [
       "Resumo do meu resultado no Vestibular FGV",
       latest ? `Última resposta: ${latest.title}` : "",
-      latest?.plan?.answer ? cleanPdfText(latest.plan.answer) : "",
+      latest?.plan?.chatMessage ? cleanPdfText(latest.plan.chatMessage) : "",
       "",
       "Baixei um resumo com cursos, datas, formas de ingresso e próximos caminhos para a graduação FGV."
     ].filter(Boolean).join("\n");
@@ -931,9 +993,7 @@ export default function Page() {
       <JourneyDrawer
         open={drawerOpen}
         journeys={journeys}
-        activeId={activeJourneyId}
         onClose={() => setDrawerOpen(false)}
-        onSelect={restoreJourney}
         onClear={clearJourney}
         leadName={leadName}
         leadEmail={leadEmail}
@@ -955,13 +1015,42 @@ export default function Page() {
           <div className="mb-8 flex h-16 w-16 items-center justify-center rounded-full bg-foreground text-background">
             <Sparkles className="h-7 w-7" />
           </div>
-          {admissionNotice ? (
-            <p className="mb-4 rounded-full border bg-muted px-4 py-1.5 text-sm font-medium text-muted-foreground">{admissionNotice}</p>
-          ) : null}
-          <h1 className="max-w-3xl text-3xl font-semibold tracking-tight md:text-5xl">Comece sua jornada para a Graduação FGV</h1>
-          <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground md:text-lg">Pergunte sobre cursos, inscrições, formas de ingresso, provas e prepare-se seu futuro na FGV.</p>
+
+          {checklist && !isChecklistComplete(checklist) ? (
+            <>
+              <p className="mb-4 rounded-full border bg-muted px-4 py-1.5 text-sm font-medium text-muted-foreground">Bem-vinda de volta</p>
+              <h1 className="max-w-3xl text-3xl font-semibold tracking-tight md:text-5xl">Continuando sua jornada em {checklist.confirmedCourseName}</h1>
+              <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground md:text-lg">
+                Você já escolheu esse curso como sua opção. Veja abaixo o que já foi feito e o que vem a seguir, rumo à inscrição.
+              </p>
+              <div className="mt-6 w-full max-w-2xl text-left">
+                <ChecklistCard checklist={checklist} />
+              </div>
+              <div className="mt-2 flex flex-wrap justify-center gap-2">
+                <Button
+                  onClick={() =>
+                    submitQuestion(
+                      `quais formas de ingresso existem para ${checklist.confirmedCourseName}${checklist.confirmedCourseCity ? ` em ${checklist.confirmedCourseCity}` : ""}?`
+                    )
+                  }
+                >
+                  Continuar de onde parei
+                </Button>
+                <Button variant="outline" onClick={() => saveChecklist(null)}>Começar algo novo</Button>
+              </div>
+            </>
+          ) : (
+            <>
+              {admissionNotice ? (
+                <p className="mb-4 rounded-full border bg-muted px-4 py-1.5 text-sm font-medium text-muted-foreground">{admissionNotice}</p>
+              ) : null}
+              <h1 className="max-w-3xl text-3xl font-semibold tracking-tight md:text-5xl">O que você deseja saber sobre a Graduação FGV?</h1>
+              <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground md:text-lg">Pergunte sobre cursos, formas de ingresso, provas e prepare-se para se tornar um GVniano.</p>
+            </>
+          )}
+
           <form onSubmit={onSubmit} className="mt-10 flex w-full max-w-2xl gap-2 rounded-full border bg-muted p-2">
-            <Input value={input} onChange={(event) => setInput(event.target.value)} placeholder="ex: quando abre a inscrição do Vestibular FGV?" className="border-0 bg-transparent focus:bg-transparent focus:ring-0" />
+            <Input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Faça uma pergunta" className="border-0 bg-transparent focus:bg-transparent focus:ring-0" />
             <Button type="submit" size="icon" disabled={!input.trim() || loading} aria-label="Buscar"><ArrowUp className="h-5 w-5" /></Button>
           </form>
           <div className="mt-6 flex max-w-3xl flex-wrap justify-center gap-2">
@@ -973,53 +1062,93 @@ export default function Page() {
           </label>
           {journeys.length ? (
             <Button variant="ghost" className="mt-8 gap-2" onClick={() => setDrawerOpen(true)}>
-              <History className="h-4 w-4" /> Histórico de perguntas
+              <Download className="h-4 w-4" /> Baixar resumo da conversa
             </Button>
           ) : null}
         </section>
       ) : (
-        <section className="mx-auto max-w-6xl px-4 py-6 md:px-6">
-          <div className="sticky top-[73px] z-30 -mx-4 border-b bg-background/95 px-4 py-4 backdrop-blur md:-mx-6 md:px-6">
-            <div className="mx-auto flex max-w-4xl items-center gap-3">
-              <form onSubmit={onSubmit} className="flex min-w-0 flex-1 gap-2 rounded-full border bg-muted p-2">
-                <Input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Pergunte outra coisa sobre a graduação FGV..." className="border-0 bg-transparent focus:bg-transparent focus:ring-0" />
-                <Button type="submit" size="icon" disabled={!input.trim() || loading} aria-label="Buscar"><ArrowUp className="h-5 w-5" /></Button>
-              </form>
-              {journeys.length ? (
-                <Button variant="outline" onClick={() => setDrawerOpen(true)} className="shrink-0 gap-2 rounded-full px-4">
-                  <History className="h-4 w-4" />
-                  <span className="hidden sm:inline">Histórico de perguntas</span>
-                  <Badge className="ml-1">{journeys.length}</Badge>
-                </Button>
-              ) : null}
-            </div>
-            <div className="mx-auto mt-2 max-w-4xl">
-              <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                <input type="checkbox" checked={aiOnly} onChange={(event) => setAiOnly(event.target.checked)} />
-                Modo teste: aiOnly (mais liberdade pra IA, sem rede de segurança)
-              </label>
-            </div>
-          </div>
+        <section className="mx-auto max-w-7xl px-4 py-0 md:px-6 md:py-6">
+          <div className="fixed inset-x-0 top-[73px] bottom-0 z-30 flex flex-col overflow-hidden md:static md:z-auto md:grid md:grid-cols-[360px_1fr] md:items-start md:gap-3 md:overflow-visible">
+            {/* Conversa: dock fixo embaixo no mobile (recolhível), coluna fixa à esquerda no desktop */}
+            <div
+              className={`order-2 flex shrink-0 flex-col gap-2 overflow-hidden rounded-t-3xl border-t bg-background shadow-2xl transition-[height] duration-300 md:order-none md:h-auto md:shrink md:gap-4 md:overflow-visible md:rounded-none md:border-t-0 md:border-r md:bg-transparent md:pr-6 md:shadow-none md:sticky md:top-[90px] md:max-h-[calc(100vh-110px)] ${mobileChatOpen ? "h-[48vh]" : "h-14"}`}
+            >
+              <button
+                type="button"
+                onClick={() => setMobileChatOpen((open) => !open)}
+                className="flex shrink-0 items-center justify-center gap-2 py-3 text-sm font-semibold md:hidden"
+              >
+                {mobileChatOpen ? <ChevronDown className="h-4 w-4" /> : <MessageCircle className="h-4 w-4" />}
+                Conversa
+              </button>
 
-          <div className="mx-auto mt-8 max-w-4xl">
-            <div className="rounded-[1.5rem] border bg-muted/30 p-5 md:p-6">
-              <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Você perguntou</p>
-              <p className="mt-2 text-xl font-medium leading-8">{currentQuestion}</p>
-            </div>
-
-            {loading ? (
-              <>
-                <div className="mt-6 rounded-[1.5rem] border p-5 md:p-6">
-                  <div className="flex items-center gap-3 font-medium">
-                    <Loader2 className="h-5 w-5 animate-spin" />
-                    Montando sua experiência<TypingDots />
-                  </div>
-                  {streamingPreview?.answer ? (
-                    <div className="mt-5 rounded-2xl bg-muted/50 p-4">
-                      {streamingPreview.pageTitle ? <p className="text-base font-semibold">{streamingPreview.pageTitle}</p> : null}
-                      <p className="mt-1 text-sm leading-6 text-muted-foreground">{streamingPreview.answer}</p>
+              <div className="flex-1 space-y-3 overflow-y-auto px-4 pr-4 md:px-0 md:pr-1">
+                {journeys.slice().reverse().map((item) => {
+                  const active = item.id === activeJourneyId;
+                  return (
+                    <div key={item.id} className="space-y-1.5">
+                      <button
+                        type="button"
+                        onClick={() => restoreJourney(item)}
+                        className={`ml-auto block max-w-[85%] rounded-2xl px-4 py-2.5 text-left text-sm font-medium transition ${active ? "bg-foreground text-background" : "bg-muted hover:bg-muted/70"}`}
+                      >
+                        {item.question}
+                      </button>
+                      {item.plan?.chatMessage ? (
+                        <button
+                          type="button"
+                          onClick={() => restoreJourney(item)}
+                          className="block w-full whitespace-pre-line text-left text-base leading-7 text-foreground"
+                        >
+                          {item.plan.chatMessage}
+                        </button>
+                      ) : null}
                     </div>
-                  ) : (
+                  );
+                })}
+                {loading ? (
+                  <div className="space-y-1.5">
+                    <div className="ml-auto block max-w-[85%] rounded-2xl bg-foreground px-4 py-2.5 text-sm font-medium text-background">{currentQuestion}</div>
+                    {streamingPreview?.chatMessage ? (
+                      <p className="whitespace-pre-line text-base leading-7 text-foreground">{streamingPreview.chatMessage}</p>
+                    ) : (
+                      <p className="flex items-center gap-1 text-base text-foreground">Pensando<TypingDots /></p>
+                    )}
+                  </div>
+                ) : null}
+                <div ref={chatEndRef} />
+              </div>
+
+              <form onSubmit={onSubmit} className="mx-4 mb-4 flex shrink-0 gap-2 rounded-full border bg-muted p-2 md:mx-0 md:mb-0">
+                <Input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Pergunte outra coisa sobre a graduação FGV..." className="border-0 bg-transparent focus:bg-transparent focus:ring-0" />
+                <Button type="submit" size="icon" disabled={!input.trim() || loading} aria-label="Enviar"><ArrowUp className="h-5 w-5" /></Button>
+              </form>
+            </div>
+
+            {/* Canvas: rola de forma independente, acima do dock no mobile */}
+            <div className="order-1 min-w-0 flex-1 overflow-y-auto px-4 pt-4 md:order-none md:flex-none md:overflow-visible md:px-0 md:pt-0">
+              <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <input type="checkbox" checked={aiOnly} onChange={(event) => setAiOnly(event.target.checked)} />
+                  Modo teste: aiOnly (mais liberdade pra IA, sem rede de segurança)
+                </label>
+                {journeys.length ? (
+                  <Button variant="outline" onClick={() => setDrawerOpen(true)} className="shrink-0 gap-2 rounded-full px-4">
+                    <Download className="h-4 w-4" />
+                    <span className="hidden sm:inline">Baixar resumo</span>
+                  </Button>
+                ) : null}
+              </div>
+
+              {checklist ? <ChecklistCard checklist={checklist} /> : null}
+
+              {loading ? (
+                <>
+                  <div className="rounded-[1.5rem] border p-5 md:p-6">
+                    <div className="flex items-center gap-3 font-medium">
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                      {streamingPreview?.pageTitle || "Montando sua experiência"}<TypingDots />
+                    </div>
                     <div className="mt-5 grid gap-3">
                       {loadingSteps.map((step, index) => (
                         <div key={step} className="flex items-center gap-3 rounded-2xl bg-muted/50 p-3 text-sm text-muted-foreground">
@@ -1028,45 +1157,61 @@ export default function Page() {
                         </div>
                       ))}
                     </div>
-                  )}
-                </div>
-                <GenerativeSkeleton variant={skeletonVariant} />
-              </>
-            ) : null}
+                  </div>
+                  <GenerativeSkeleton variant={skeletonVariant} />
+                </>
+              ) : null}
 
-            {error ? (
-              <div className="mt-6 rounded-[1.5rem] border border-red-200 bg-red-50 p-5 text-sm text-red-900">{error}</div>
-            ) : null}
+              {error ? (
+                <div className="rounded-[1.5rem] border border-red-200 bg-red-50 p-5 text-sm text-red-900">{error}</div>
+              ) : null}
 
-            {plan ? (
-              <div className="mt-6 space-y-6">
-                <p className="text-center text-[0.65rem] font-medium uppercase tracking-[0.16em] text-muted-foreground">Esta página foi gerada pela IA baseada na sua pergunta.</p>
-                <div className="rounded-[1.5rem] border p-5 md:p-6">
-                  <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">{plan.pageTitle}</h1>
-                  {plan.answer ? <p className="mt-3 text-base leading-7 text-muted-foreground md:text-lg">{plan.answer}</p> : null}
-                  {plan.enrollCta ? (
-                    plan.enrollCta.open ? (
-                      <Button asChild size="lg" className="mt-5 gap-2">
-                        <Link href={plan.enrollCta.href!}>Inscreva-se</Link>
-                      </Button>
-                    ) : (
-                      <Button
-                        size="lg"
-                        variant="outline"
-                        className="mt-5 gap-2"
-                        onClick={() => plan.enrollCta?.prompt && submitQuestion(plan.enrollCta.prompt)}
-                      >
-                        <Bell className="h-4 w-4" />
-                        Avise-me
-                      </Button>
-                    )
-                  ) : null}
+              {plan ? (
+                <div className="space-y-6">
+                  <div className="rounded-[1.5rem] border p-5 md:p-6">
+                    <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">{plan.pageTitle}</h1>
+                    {plan.enrollCta ? (
+                      plan.enrollCta.open ? (
+                        <Button asChild size="lg" className="mt-5 gap-2">
+                          <Link href={plan.enrollCta.href!} onClick={() => markChecklistStep("inscricao")}>Inscreva-se</Link>
+                        </Button>
+                      ) : (
+                        <Button
+                          size="lg"
+                          variant="outline"
+                          className="mt-5 gap-2"
+                          onClick={() => plan.enrollCta?.prompt && submitQuestion(plan.enrollCta.prompt)}
+                        >
+                          <Bell className="h-4 w-4" />
+                          Avise-me
+                        </Button>
+                      )
+                    ) : null}
+
+                    {activeCourseDetail && confirmDismissedFor !== activeCourseDetail.id && checklist?.confirmedCourseId !== activeCourseDetail.id ? (
+                      <div className="mt-5 flex flex-wrap items-center gap-3 rounded-2xl border border-dashed p-4">
+                        <p className="flex-1 text-sm font-medium">
+                          Quer seguir com {activeCourseDetail.displayName || activeCourseDetail.name} como sua opção?
+                        </p>
+                        <div className="flex gap-2">
+                          <Button size="sm" onClick={() => confirmCourse(activeCourseDetail)}>Sim, quero esse curso</Button>
+                          <Button size="sm" variant="outline" onClick={() => setConfirmDismissedFor(activeCourseDetail.id)}>Agora não</Button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                  {sections.slice(0, visibleCount).map((section, index) => (
+                    <SectionRenderer key={`${section.type}-${index}-${section.title}`} section={section} onPrompt={submitQuestion} onCompareRequest={() => setCompareOpen(true)} />
+                  ))}
                 </div>
-                {sections.slice(0, visibleCount).map((section, index) => (
-                  <SectionRenderer key={`${section.type}-${index}-${section.title}`} section={section} onPrompt={submitQuestion} onCompareRequest={() => setCompareOpen(true)} />
-                ))}
-              </div>
-            ) : null}
+              ) : null}
+
+              {!plan && !loading && !error ? (
+                <div className="rounded-[1.5rem] border border-dashed p-8 text-center text-sm text-muted-foreground">
+                  Faça uma pergunta para começar a explorar.
+                </div>
+              ) : null}
+            </div>
           </div>
         </section>
       )}

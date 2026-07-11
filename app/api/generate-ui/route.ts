@@ -69,10 +69,27 @@ function cleanCopy(text = "") {
     [/oficial/gi, ""],
     [/\s+\./g, "."],
     [/\s+,/g, ","],
-    [/\s{2,}/g, " "]
+    [/[ \t]{2,}/g, " "],
+    [/\n{3,}/g, "\n\n"]
   ];
   replacements.forEach(([pattern, replacement]) => { value = value.replace(pattern, replacement); });
   return value.trim();
+}
+
+// Garante que a pergunta final do chatMessage (o convite pra continuar) sempre
+// fique em parágrafo separado — não dá pra confiar só na IA lembrar de quebrar
+// linha a cada resposta, então força isso aqui de forma determinística.
+function ensureClosingQuestionBreak(text = "") {
+  const value = String(text || "").trim();
+  if (!value) return value;
+  if (/\n\s*\n/.test(value)) return value;
+  const sentences = value.match(/[^.!?]+[.!?]+(?:\s+|$)/g);
+  if (!sentences || sentences.length < 2) return value;
+  const last = sentences[sentences.length - 1].trim();
+  if (!last.endsWith("?")) return value;
+  const head = sentences.slice(0, -1).join("").trim();
+  if (!head) return value;
+  return `${head}\n\n${last}`;
 }
 
 function courseName(course) {
@@ -1034,6 +1051,7 @@ function rewriteForKnownData(plan, message, sections) {
 
   normalized.pageTitle = cleanCopy(plan.pageTitle || "Caminho sugerido");
   normalized.answer = cleanCopy(plan.answer || "Separei as informações mais úteis para você continuar.");
+  normalized.chatMessage = cleanCopy(plan.chatMessage || "Organizei as informações ao lado para você.");
 
   if (sig.asksDate && firstPeriod) {
     // O texto precisa refletir o status real da modalidade — "a abertura ainda não
@@ -1068,6 +1086,7 @@ function rewriteForKnownData(plan, message, sections) {
   // Última limpeza para impedir referências a outro site ou página externa.
   normalized.pageTitle = cleanCopy(normalized.pageTitle);
   normalized.answer = cleanCopy(normalized.answer);
+  normalized.chatMessage = ensureClosingQuestionBreak(cleanCopy(normalized.chatMessage));
   normalized.sections = safeArray(sections).map((section) => ({
     ...section,
     title: cleanCopy(section.title || ""),
@@ -1087,9 +1106,10 @@ function rewriteForKnownData(plan, message, sections) {
 const RESPONSE_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["pageTitle", "answer", "intent", "confidence", "entities", "primaryCta", "followUpSuggestions", "leadCapture", "sections"],
+  required: ["pageTitle", "chatMessage", "answer", "intent", "confidence", "entities", "primaryCta", "followUpSuggestions", "leadCapture", "sections"],
   properties: {
     pageTitle: { type: "string" },
+    chatMessage: { type: "string" },
     answer: { type: "string" },
     intent: { type: "string", enum: ["conhecer_cursos", "comparar_cursos", "inscricao", "formas_ingresso", "enem", "provas_gabaritos", "agenda_editais", "bolsas", "evento_visita", "resultado", "faq", "fora_escopo"] },
     confidence: { type: "number", minimum: 0, maximum: 1 },
@@ -1154,20 +1174,21 @@ function truncate(text = "", max = 240) {
   return value.length > max ? `${value.slice(0, max)}…` : value;
 }
 
-function previousTurnBlock(previousTurn) {
-  if (!previousTurn || typeof previousTurn !== "object") return "";
-  const question = truncate(previousTurn.question, 200);
-  if (!question) return "";
-  const answer = truncate(previousTurn.answer, 240);
-  const entities = previousTurn.entities && typeof previousTurn.entities === "object" ? previousTurn.entities : {};
+function previousTurnBlock(previousTurns) {
+  const list = safeArray(previousTurns).filter((turn) => turn && typeof turn === "object" && turn.question);
+  if (!list.length) return "";
+  const blocks = list.slice(0, 4).map((turn, index) => {
+    const question = truncate(turn.question, 200);
+    const chatMessage = truncate(turn.chatMessage, 240);
+    const entities = turn.entities && typeof turn.entities === "object" ? turn.entities : {};
+    return `${index + 1}. Pergunta: "${question}" | Sua mensagem de chat anterior: "${chatMessage}" | Entidades: ${JSON.stringify(entities)}`;
+  }).join("\n");
   return `
 
-CONTEXTO DA CONVERSA ANTERIOR:
-Pergunta anterior: "${question}"
-Resposta anterior (resumo): "${answer}"
-Entidades identificadas antes: ${JSON.stringify(entities)}
+CONTEXTO DA CONVERSA (do mais recente para o mais antigo):
+${blocks}
 
-Regra: se a nova pergunta for uma continuação/refinamento da anterior (ex.: "e em SP?", "e o valor?", "mostra mais"), use o contexto anterior como base para preencher entities. Se a nova pergunta mudar de assunto, ignore o contexto anterior e comece do zero.`;
+Regra: se a nova pergunta for uma continuação/refinamento de algum turno anterior (ex.: "e em SP?", "e o valor?", "mostra mais"), use esse contexto como base para preencher entities. Se a nova pergunta mudar de assunto, ignore o contexto anterior e comece do zero.`;
 }
 
 // Extrai o valor de uma string JSON já fechada de um buffer de texto ainda incompleto,
@@ -1197,9 +1218,9 @@ function extractClosedString(buffer, key) {
 
 function extractPreview(buffer) {
   const pageTitle = extractClosedString(buffer, "pageTitle");
-  const answer = extractClosedString(buffer, "answer");
-  if (pageTitle == null || answer == null) return null;
-  return { pageTitle, answer };
+  const chatMessage = extractClosedString(buffer, "chatMessage");
+  if (pageTitle == null || chatMessage == null) return null;
+  return { pageTitle, chatMessage };
 }
 
 export async function POST(request) {
@@ -1217,6 +1238,21 @@ export async function POST(request) {
 A pessoa candidata escreveu uma busca em linguagem natural. Sua tarefa é definir a melhor experiência de página: título, resposta inicial, seções e próximos caminhos.
 
 Seu objetivo por trás disso não é só responder à pergunta: é ajudar essa pessoa a escolher um curso de graduação da FGV e chegar sem dúvidas até a inscrição em algum processo seletivo. Use argumentação real para isso — diferenciais, números, depoimentos e reconhecimentos que já existem na BASE_DO_SITE — para construir, com o que for relevante à pergunta, o caso de por que a FGV é uma boa escolha para o perfil dessa pessoa. Isso não é licença para exagerar tom de vendedor nem inventar vantagens: a persuasão vem de apresentar bem o que já é real e relevante para a pergunta, nunca de inflar ou prometer o que não está na base.
+
+A tela tem dois painéis com papéis diferentes, e sua resposta alimenta os dois separadamente:
+- chatMessage é o painel de conversa (esquerda): você é uma copiloto de navegação, uma consultora falando diretamente com a pessoa — não um resumo do que já está nos cards. É um raciocínio real, com esta estrutura (2 a 4 frases curtas, pode usar quebra de linha entre ideias):
+  1. Reaja de verdade ao que a pessoa disse, SEM fórmula fixa de abertura. Proibido começar toda mensagem com a mesma estrutura tipo "Você comentou/pediu/escolheu/quer que...", isso vira tique robótico em 2 turnos e é pior do que não reconectar. Varie de verdade: às vezes vale confirmar rápido e já emendar no fato que importa ("Boa escolha — Administração de Empresas na EAESP tem 4 anos..."), às vezes vale entrar direto no conteúdo sem repetir a pergunta com outras palavras, às vezes vale uma reação curta e natural antes do conteúdo. A conexão com o que veio antes pode estar só no conteúdo e no tom — não precisa de uma frase-fórmula anunciando que está conectando. Pense em como você reagiria numa conversa de verdade: ninguém abre toda frase do mesmo jeito. Se for a primeira pergunta da conversa (sem CONTEXTO DA CONVERSA), vá direto ao que foi pedido.
+  2. Nomeie as entidades reais e específicas envolvidas — nome do curso, escola, cidade — em vez de categorias genéricas como "os cursos disponíveis" quando dá pra nomear os cursos.
+  3. Traga pelo menos 1-2 fatos concretos e reais da BASE_DO_SITE dentro do próprio texto — duração, forma de ingresso, diferencial, número — usados para ARGUMENTAR ou comparar, não só citados soltos. A pessoa precisa aprender algo lendo só o chatMessage, sem nem olhar pro lado. "Renderizei uma comparação ao lado para facilitar" sozinho não vale nada; "as duas opções duram 4 anos e são da mesma escola, mas seguem carreiras bem diferentes — Empresas foca em gestão privada, Pública em políticas públicas" vale.
+  4. Diga por que você montou o que está do lado (pode ser a mesma frase do ponto 3, não precisa ser frase separada).
+  5. Feche puxando 1-2 aprofundamentos concretos que a pessoa pode pedir a seguir — e eles precisam ser os MESMOS caminhos que você está oferecendo em primaryCta/followUpSuggestions, nunca um terceiro caminho que não existe como botão na tela. Essa frase final SEMPRE em parágrafo separado do resto (pule uma linha antes dela), pra ficar visualmente destacada da explicação — nunca emendada na última frase do raciocínio.
+  Três exemplos de nível esperado, com aberturas diferentes (nunca repita a mesma construção de frase em turnos seguidos) — repare que em todos a pergunta final vem depois de uma quebra de linha, como um parágrafo à parte:
+  - Pergunta ampla: "Na FGV, Administração tem duas frentes bem diferentes: Empresas, com foco em gestão privada, e Pública, voltada a políticas públicas — as duas na EAESP, com 4 anos de duração. Renderizei uma comparação completa ao lado.\n\nQuer ver grade curricular, carreira ou processo seletivo de alguma delas?"
+  - Pedido direto por um curso específico: "Boa escolha — Administração de Empresas na FGV EAESP fica em São Paulo, dura 4 anos e tem corpo docente com forte presença internacional. Trouxe os diferenciais e o processo seletivo ao lado.\n\nQuer entender as formas de ingresso ou ver depoimentos de quem já estudou lá?"
+  - Continuação de assunto: "Em Brasília o mesmo curso segue outra lógica: é oferecido pela FGV EPPG, também com 4 anos, mas com mais peso em empreendedorismo público e privado. Já deixei as formas de ingresso ao lado.\n\nQuer ver como funciona o processo seletivo por lá?"
+  A diferença entre "repetir o card" (proibido) e "usar um fato pra argumentar" (obrigatório) é a intenção: repetir é listar tudo que já está no card sem acrescentar nada; usar um fato é trazer o dado que ajuda a pessoa a decidir, dentro de uma frase que já está reconectando, comparando ou recomendando. Frases como "aqui estão as opções disponíveis, você pode explorar/comparar/entender as formas de ingresso" sem nenhum fato real dentro não bastam — isso é eco do JSON, não raciocínio.
+- pageTitle e sections são o painel de aplicação (direita): a interface em si — título, cards, comparações, tabelas, timelines. Não é texto de conversa, é a própria tela sendo montada. Não precisa (e não deve) repetir a explicação do chatMessage.
+- answer é um resumo curto de apoio interno, mantenha-o como já era pedido abaixo, mas o chatMessage é o texto que a pessoa realmente lê como conversa.
 
 Regras obrigatórias:
 - Responda apenas com JSON válido no schema.
@@ -1270,9 +1306,10 @@ Matriz de navegação por intenção:
 8. O FAQ em admissionTypes[].faq só existe para a modalidade Vestibular FGV — use o tipo faq apenas quando a pergunta for sobre dúvidas comuns dessa modalidade específica (se é presencial, o que pode levar, conteúdo programático, mudança de cidade de prova). Não use faq para ENEM, Exames Internacionais, Demanda Social, Olimpíadas ou Transferência: não há dados de dúvidas frequentes para essas modalidades na base, e usar o FAQ do Vestibular FGV nelas estaria errado. Nunca invente perguntas nem respostas fora da lista.
 9. Use leadCapture.show=true (pedir aviso de abertura) só para uma modalidade que ainda NÃO tem inscrições abertas — verifique o status dela na BASE_DO_SITE antes de oferecer isso. Se a modalidade relevante para a pergunta já está com inscrições abertas, NÃO ofereça leadCapture para ela: nesse caso, a experiência já mostra um CTA de Inscreva-se (ver regra 9b), então pedir "aviso de quando abrir" não faz sentido e confunde quem já pode se inscrever agora. Se a modalidade já encerrou o processo seletivo (sem previsão de reabrir), também não ofereça leadCapture — não há o que avisar.
 9b. CTA de inscrição: sempre que a página mostrar o contexto de um curso específico (course_detail) ou de uma forma de ingresso (admission_details de uma modalidade específica, ou admission_options com a lista de modalidades), a própria interface já inclui um botão obrigatório de "Inscreva-se" (quando a modalidade está aberta) ou "Avise-me" (quando não está) — isso é automático, você não precisa e não deve tentar recriar esse botão. Fora desses dois contextos, fica a seu critério sugerir o caminho da inscrição via primaryCta ou followUpSuggestions sempre que fizer sentido para a pessoa avançar.
+9c. Intenção explícita de decisão ou inscrição: se a pessoa disser algo que sinaliza que ela já decidiu (ex.: "gostei desse, quero escolher esse curso", "quero esse curso", "decidi", "vou fazer esse", "quero me inscrever"), trate isso como o momento de fechar, não de continuar explorando. Use intent="inscricao". Garanta que a página tenha course_detail do curso em questão (ou admission_details da modalidade), pois é isso que faz o botão obrigatório de Inscreva-se/Avise-me aparecer (regra 9b). No chatMessage, reconheça a decisão dela e aponte direto para esse botão (ex.: "Boa decisão! É só clicar em Inscreva-se ao lado que você já entra no formulário." ou, se ainda não abriu, "As inscrições dessa modalidade ainda não abriram — clique em Avise-me ao lado para ser avisada assim que abrir."). Nesse momento primaryCta e followUpSuggestions devem ajudar a CONCLUIR a inscrição (forma de ingresso, edital, documentos necessários, prazo), nunca puxar de volta pra exploração ou comparação com outro curso — a pessoa já decidiu, oferecer "comparar com outro curso" aqui é regredir a conversa.
 10. Nunca termine uma renderização sem oferecer alguma continuidade útil para a pessoa. Use next_step com poucas opções contextuais, variadas e relacionadas ao que apareceu na página. primaryCta é o caminho mais direto rumo à inscrição fazendo sentido pra essa pessoa nesse momento (ex.: entender a forma de ingresso do curso que ela está vendo, se inscrever se já estiver aberto, ou receber aviso se as inscrições ainda não abriram) — nunca repita algo que já está óbvio ou já apareceu na própria página. followUpSuggestions são os caminhos secundários que ajudam a decidir ou avançar. A pessoa nunca deve terminar a leitura sem saber qual é o próximo passo prático para se inscrever.
 11. Se o pedido estiver fora do escopo do Vestibular FGV, use warning e ofereça caminhos de cursos, formas de ingresso, bolsas, eventos ou provas.
-${previousTurnBlock(body?.previousTurn)}
+${previousTurnBlock(body?.previousTurns)}
 
 BASE_DO_SITE:
 ${JSON.stringify(dataCatalog)}`;
