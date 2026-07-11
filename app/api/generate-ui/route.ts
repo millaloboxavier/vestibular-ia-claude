@@ -388,6 +388,9 @@ function admissionItems(message, courses = [], admissionIds = []) {
     });
   });
   if (!items.length) items = selectedAdmissions;
+  // Curso único já mostra o CTA de inscrição obrigatório no topo da página (courseEnrollCta) —
+  // repetir um botão de Inscreva-se/Avise-me por modalidade aqui embaixo fica redundante.
+  const suppressCta = courses.length === 1;
   return items.slice(0, 6).map((item) => ({
     id: item.id,
     label: item.label || item.name || "Forma de ingresso",
@@ -395,7 +398,7 @@ function admissionItems(message, courses = [], admissionIds = []) {
     status: labelStatus(item.status),
     cycle: item.cycle || "",
     period: formatPeriod(item.startDate, item.endDate),
-    ...admissionTypeCta(item)
+    ...(suppressCta ? {} : admissionTypeCta(item))
   }));
 }
 
@@ -441,12 +444,13 @@ function courseRefParts(courseId) {
   return { name: course ? (course.displayName || course.name) : courseId, city: course ? course.city : "" };
 }
 
-function admissionTypeDetailsItems(item) {
+function admissionTypeDetailsItems(item, suppressCta = false) {
   if (!item) return [];
   const rows = [];
   // CTA obrigatório no contexto de forma de ingresso: Inscreva-se quando está aberta,
-  // Avise-me caso contrário.
-  rows.push({ title: "Inscrição", type: "inscrição", ctaAdmission: { label: item.label || item.name, ...admissionTypeCta(item) } });
+  // Avise-me caso contrário. Quando a página já é de um curso específico, o cabeçalho
+  // (courseEnrollCta) já mostra esse botão — repetir aqui duplicaria.
+  if (!suppressCta) rows.push({ title: "Inscrição", type: "inscrição", ctaAdmission: { label: item.label || item.name, ...admissionTypeCta(item) } });
   if (item.registrationFrequency) rows.push({ title: "Quando acontece", shortDescription: item.registrationFrequency, type: "calendário" });
   if (item.examDate) rows.push({ title: "Data da prova", shortDescription: item.examDate, type: "prova" });
   if (safeArray(item.eligibility).length) rows.push({ title: "Quem pode participar", shortDescription: safeArray(item.eligibility).join(" "), type: "elegibilidade" });
@@ -482,8 +486,8 @@ function admissionTypeDetailsItems(item) {
   return rows.slice(0, 7);
 }
 
-function vestibularDetailsItems() {
-  return admissionTypeDetailsItems(vestibularAdmission());
+function vestibularDetailsItems(suppressCta = false) {
+  return admissionTypeDetailsItems(vestibularAdmission(), suppressCta);
 }
 
 function vestibularFaqItems() {
@@ -835,7 +839,7 @@ function resolveSections(plan, message, options = {}) {
 
     if (section.type === "admission_details") {
       const admission = specificAdmissionType || vestibularAdmission();
-      const items = admissionTypeDetailsItems(admission);
+      const items = admissionTypeDetailsItems(admission, specificCourseContext());
       const title = specificAdmissionType ? `Como funciona: ${specificAdmissionType.label}` : "Como funciona o Vestibular FGV";
       const intro = specificAdmissionType ? (specificAdmissionType.description || "Veja o essencial sobre essa forma de ingresso.") : "Veja o essencial sobre a prova, a inscrição e a preparação para essa forma de ingresso.";
       if (items.length) addSection({ ...sectionBase(section, "admission_details", title, intro, "cards"), items });
@@ -924,12 +928,12 @@ function resolveSections(plan, message, options = {}) {
     }
 
     if (sig.asksVestibularSpecific && !resolved.some((section) => section.type === "admission_details")) {
-      const items = vestibularDetailsItems();
+      const items = vestibularDetailsItems(specificCourseContext());
       if (items.length) addSection({ type: "admission_details", title: "Como funciona o Vestibular FGV", intro: "Veja o essencial sobre a prova, a inscrição e a preparação para essa forma de ingresso.", layout: "cards", items, actions: [] });
     }
 
     if (specificAdmissionType && !resolved.some((section) => section.type === "admission_details")) {
-      const items = admissionTypeDetailsItems(specificAdmissionType);
+      const items = admissionTypeDetailsItems(specificAdmissionType, specificCourseContext());
       if (items.length) addSection({ type: "admission_details", title: `Como funciona: ${specificAdmissionType.label}`, intro: specificAdmissionType.description || "Veja o essencial sobre essa forma de ingresso.", layout: "cards", items, actions: [] });
     }
 
@@ -1181,14 +1185,16 @@ function previousTurnBlock(previousTurns) {
     const question = truncate(turn.question, 200);
     const chatMessage = truncate(turn.chatMessage, 240);
     const entities = turn.entities && typeof turn.entities === "object" ? turn.entities : {};
-    return `${index + 1}. Pergunta: "${question}" | Sua mensagem de chat anterior: "${chatMessage}" | Entidades: ${JSON.stringify(entities)}`;
+    const tag = index === 0 ? " (ESTE É O QUE ESTÁ NA TELA AGORA)" : "";
+    return `${index + 1}${tag}. Pergunta: "${question}" | Sua mensagem de chat anterior: "${chatMessage}" | Entidades: ${JSON.stringify(entities)}`;
   }).join("\n");
   return `
 
-CONTEXTO DA CONVERSA (do mais recente para o mais antigo):
+CONTEXTO DA CONVERSA (do mais recente para o mais antigo — o item 1 é o que a pessoa está vendo na tela neste exato momento):
 ${blocks}
 
-Regra: se a nova pergunta for uma continuação/refinamento de algum turno anterior (ex.: "e em SP?", "e o valor?", "mostra mais"), use esse contexto como base para preencher entities. Se a nova pergunta mudar de assunto, ignore o contexto anterior e comece do zero.`;
+Regra: se a nova pergunta for uma continuação/refinamento de algum turno anterior (ex.: "e em SP?", "e o valor?", "mostra mais"), use esse contexto como base para preencher entities. Se a nova pergunta mudar de assunto, ignore o contexto anterior e comece do zero.
+Regra de pronome/referência: quando a pergunta usar uma referência implícita sem nomear o curso/cidade/modalidade (ex.: "gostei desse", "quero esse", "esse aí", "esse curso", "escolho esse"), ela SEMPRE se refere ao item 1 (o que está na tela agora) — nunca a um turno mais antigo da lista, mesmo que o item 1 tenha sido uma continuação de outro curso citado antes. É o que a pessoa está olhando neste momento que importa para resolver o pronome.`;
 }
 
 // Extrai o valor de uma string JSON já fechada de um buffer de texto ainda incompleto,
@@ -1246,10 +1252,11 @@ A tela tem dois painéis com papéis diferentes, e sua resposta alimenta os dois
   3. Traga pelo menos 1-2 fatos concretos e reais da BASE_DO_SITE dentro do próprio texto — duração, forma de ingresso, diferencial, número — usados para ARGUMENTAR ou comparar, não só citados soltos. A pessoa precisa aprender algo lendo só o chatMessage, sem nem olhar pro lado. "Renderizei uma comparação ao lado para facilitar" sozinho não vale nada; "as duas opções duram 4 anos e são da mesma escola, mas seguem carreiras bem diferentes — Empresas foca em gestão privada, Pública em políticas públicas" vale.
   4. Diga por que você montou o que está do lado (pode ser a mesma frase do ponto 3, não precisa ser frase separada).
   5. Feche puxando 1-2 aprofundamentos concretos que a pessoa pode pedir a seguir — e eles precisam ser os MESMOS caminhos que você está oferecendo em primaryCta/followUpSuggestions, nunca um terceiro caminho que não existe como botão na tela. Essa frase final SEMPRE em parágrafo separado do resto (pule uma linha antes dela), pra ficar visualmente destacada da explicação — nunca emendada na última frase do raciocínio.
-  Três exemplos de nível esperado, com aberturas diferentes (nunca repita a mesma construção de frase em turnos seguidos) — repare que em todos a pergunta final vem depois de uma quebra de linha, como um parágrafo à parte:
-  - Pergunta ampla: "Na FGV, Administração tem duas frentes bem diferentes: Empresas, com foco em gestão privada, e Pública, voltada a políticas públicas — as duas na EAESP, com 4 anos de duração. Renderizei uma comparação completa ao lado.\n\nQuer ver grade curricular, carreira ou processo seletivo de alguma delas?"
-  - Pedido direto por um curso específico: "Boa escolha — Administração de Empresas na FGV EAESP fica em São Paulo, dura 4 anos e tem corpo docente com forte presença internacional. Trouxe os diferenciais e o processo seletivo ao lado.\n\nQuer entender as formas de ingresso ou ver depoimentos de quem já estudou lá?"
-  - Continuação de assunto: "Em Brasília o mesmo curso segue outra lógica: é oferecido pela FGV EPPG, também com 4 anos, mas com mais peso em empreendedorismo público e privado. Já deixei as formas de ingresso ao lado.\n\nQuer ver como funciona o processo seletivo por lá?"
+  6. Formatação para deixar o texto escaneável: use **negrito** (markdown simples, só dois asteriscos) nos termos que mais importam pra pessoa bater o olho — nome do curso, cidade, escola, e o dado concreto do ponto 3 (ex.: "**4 anos**", "**R$ 7.850,00**"). Não exagere: 2 a 4 trechos em negrito por mensagem, nunca a frase inteira. Se a explicação tiver mais de uma ideia antes do fechamento (ex.: contexto + comparação de dois cursos), separe em dois parágrafos curtos com quebra de linha entre eles, além do parágrafo final da pergunta — três parágrafos curtos escaneiam muito melhor que um bloco só.
+  Três exemplos de nível esperado, com aberturas diferentes (nunca repita a mesma construção de frase em turnos seguidos) — repare no negrito pontual e na pergunta final sempre em parágrafo à parte:
+  - Pergunta ampla: "Na FGV, Administração tem duas frentes bem diferentes: **Empresas**, com foco em gestão privada, e **Pública**, voltada a políticas públicas — as duas na **EAESP**, com **4 anos** de duração.\n\nRenderizei uma comparação completa ao lado.\n\nQuer ver grade curricular, carreira ou processo seletivo de alguma delas?"
+  - Pedido direto por um curso específico: "Boa escolha — **Administração de Empresas** na FGV EAESP fica em **São Paulo**, dura **4 anos** e tem corpo docente com forte presença internacional. Trouxe os diferenciais e o processo seletivo ao lado.\n\nQuer entender as formas de ingresso ou ver depoimentos de quem já estudou lá?"
+  - Continuação de assunto: "Em **Brasília** o mesmo curso segue outra lógica: é oferecido pela **FGV EPPG**, também com **4 anos**, mas com mais peso em empreendedorismo público e privado. Já deixei as formas de ingresso ao lado.\n\nQuer ver como funciona o processo seletivo por lá?"
   A diferença entre "repetir o card" (proibido) e "usar um fato pra argumentar" (obrigatório) é a intenção: repetir é listar tudo que já está no card sem acrescentar nada; usar um fato é trazer o dado que ajuda a pessoa a decidir, dentro de uma frase que já está reconectando, comparando ou recomendando. Frases como "aqui estão as opções disponíveis, você pode explorar/comparar/entender as formas de ingresso" sem nenhum fato real dentro não bastam — isso é eco do JSON, não raciocínio.
 - pageTitle e sections são o painel de aplicação (direita): a interface em si — título, cards, comparações, tabelas, timelines. Não é texto de conversa, é a própria tela sendo montada. Não precisa (e não deve) repetir a explicação do chatMessage.
 - answer é um resumo curto de apoio interno, mantenha-o como já era pedido abaixo, mas o chatMessage é o texto que a pessoa realmente lê como conversa.
@@ -1258,6 +1265,7 @@ Regras obrigatórias:
 - Responda apenas com JSON válido no schema.
 - Use somente IDs que aparecem na BASE_DO_SITE.
 - Não invente prazos, valores, vagas, regras, reconhecimentos, bolsas ou eventos.
+- Sempre que mencionar um valor monetário no chatMessage ou no texto de uma seção (mensalidade, taxa de inscrição, etc.), adicione uma nota curta deixando claro que é um valor de referência do último ciclo divulgado e pode mudar (ex.: "mensalidade de R$ 7.850,00 (*valor de referência do último ano, sujeito a reajuste)"). Nunca apresente um valor monetário como definitivo para o próximo processo seletivo.
 - Trate esta interface como o próprio site do Vestibular FGV. Nunca escreva "consulte", "acesse", "página oficial", "site oficial", "página do Vestibular", "abrir site", "ver página" nem qualquer frase que pareça mandar o usuário para outro site ou para outra página. Use "veja abaixo", "nesta página" ou apresente a informação diretamente.
 - Não escreva como mecanismo de busca. Evite "resultado da busca", "sua busca", "a partir desta busca" e linguagem de sistema. Escreva como uma conversa útil com o candidato.
 - O texto deve parecer interface final para vestibulandos: claro, humano, útil, sem mencionar IA, JSON, componente, intenção, confiança, protótipo ou sistema.
@@ -1296,6 +1304,7 @@ Matriz de navegação por intenção:
    - Não mostre todas as formas de ingresso nesse caso.
    - Use timeline primeiro, depois admission_details, prep_materials e events quando houver.
    - Se a base tiver startDate e endDate, cite o período explicitamente no answer.
+4c. Quando a pergunta for sobre as formas de ingresso de um curso específico (ex.: "quais formas de ingresso existem para Administração de Empresas em Brasília", "como posso entrar nesse curso"), use admission_options — não admission_details de uma única modalidade. A fonte da verdade é o campo admissions desse curso na BASE_DO_SITE: ele lista TODAS as modalidades que aquele curso aceita, e normalmente é mais de uma (Vestibular FGV, ENEM, Exames Internacionais, Demanda Social, Transferência, Olimpíadas, conforme o curso). Mostrar só o Vestibular FGV quando o curso aceita várias outras modalidades é uma resposta incompleta.
 4b. De forma geral, quando a pessoa já está vendo os detalhes de uma forma de ingresso específica (Vestibular FGV, ENEM, Exames Internacionais, Demanda Social, Olimpíadas, Transferência), não use admission_options — repetir a mesma modalidade que já é o assunto da página não ajuda. Em vez disso, se fizer sentido, monte você mesma uma seção course_cards com título "Cursos que aceitam [nome da modalidade]": use o campo admissions de cada curso na BASE_DO_SITE para descobrir quais cursos aceitam essa modalidade e liste os courseIds correspondentes. Se os cursos identificados estiverem em mais de uma cidade, use layout tabs_by_city para organizar por cidade.
 5. Para pergunta ampla sobre datas, inscrição, prazo ou processo seletivo:
    - Use timeline primeiro.
@@ -1305,7 +1314,7 @@ Matriz de navegação por intenção:
 7. Para pergunta sobre preparação, prova, gabarito ou Vestibular FGV, inclua prep_materials quando houver materiais úteis na base.
 8. O FAQ em admissionTypes[].faq só existe para a modalidade Vestibular FGV — use o tipo faq apenas quando a pergunta for sobre dúvidas comuns dessa modalidade específica (se é presencial, o que pode levar, conteúdo programático, mudança de cidade de prova). Não use faq para ENEM, Exames Internacionais, Demanda Social, Olimpíadas ou Transferência: não há dados de dúvidas frequentes para essas modalidades na base, e usar o FAQ do Vestibular FGV nelas estaria errado. Nunca invente perguntas nem respostas fora da lista.
 9. Use leadCapture.show=true (pedir aviso de abertura) só para uma modalidade que ainda NÃO tem inscrições abertas — verifique o status dela na BASE_DO_SITE antes de oferecer isso. Se a modalidade relevante para a pergunta já está com inscrições abertas, NÃO ofereça leadCapture para ela: nesse caso, a experiência já mostra um CTA de Inscreva-se (ver regra 9b), então pedir "aviso de quando abrir" não faz sentido e confunde quem já pode se inscrever agora. Se a modalidade já encerrou o processo seletivo (sem previsão de reabrir), também não ofereça leadCapture — não há o que avisar.
-9b. CTA de inscrição: sempre que a página mostrar o contexto de um curso específico (course_detail) ou de uma forma de ingresso (admission_details de uma modalidade específica, ou admission_options com a lista de modalidades), a própria interface já inclui um botão obrigatório de "Inscreva-se" (quando a modalidade está aberta) ou "Avise-me" (quando não está) — isso é automático, você não precisa e não deve tentar recriar esse botão. Fora desses dois contextos, fica a seu critério sugerir o caminho da inscrição via primaryCta ou followUpSuggestions sempre que fizer sentido para a pessoa avançar.
+9b. CTA de inscrição: sempre que a página mostrar o contexto de um curso específico (course_detail) ou de uma forma de ingresso (admission_details de uma modalidade específica, ou admission_options com a lista de modalidades), a própria interface já inclui um botão obrigatório de "Inscreva-se" (quando a modalidade está aberta) ou "Avise-me" (quando não está) — isso é automático, você não precisa e não deve tentar recriar esse botão. Isso inclui NUNCA usar "Inscreva-se" ou "Avise-me" como texto de primaryCta.label nem como item de followUpSuggestions — esses dois rótulos são exclusivos do botão automático da interface; repeti-los como chip de sugestão cria um segundo botão falso (que só reenvia texto, não leva ao formulário de verdade) bem ao lado do botão real. Se quiser sugerir continuar rumo à inscrição, descreva uma ação concreta diferente (ex.: "Ver formas de ingresso", "Conferir o edital", "Ver documentos necessários"). Fora dos dois contextos citados, fica a seu critério sugerir o caminho da inscrição via primaryCta ou followUpSuggestions sempre que fizer sentido para a pessoa avançar — só nunca com esses dois rótulos reservados.
 9c. Intenção explícita de decisão ou inscrição: se a pessoa disser algo que sinaliza que ela já decidiu (ex.: "gostei desse, quero escolher esse curso", "quero esse curso", "decidi", "vou fazer esse", "quero me inscrever"), trate isso como o momento de fechar, não de continuar explorando. Use intent="inscricao". Garanta que a página tenha course_detail do curso em questão (ou admission_details da modalidade), pois é isso que faz o botão obrigatório de Inscreva-se/Avise-me aparecer (regra 9b). No chatMessage, reconheça a decisão dela e aponte direto para esse botão (ex.: "Boa decisão! É só clicar em Inscreva-se ao lado que você já entra no formulário." ou, se ainda não abriu, "As inscrições dessa modalidade ainda não abriram — clique em Avise-me ao lado para ser avisada assim que abrir."). Nesse momento primaryCta e followUpSuggestions devem ajudar a CONCLUIR a inscrição (forma de ingresso, edital, documentos necessários, prazo), nunca puxar de volta pra exploração ou comparação com outro curso — a pessoa já decidiu, oferecer "comparar com outro curso" aqui é regredir a conversa.
 10. Nunca termine uma renderização sem oferecer alguma continuidade útil para a pessoa. Use next_step com poucas opções contextuais, variadas e relacionadas ao que apareceu na página. primaryCta é o caminho mais direto rumo à inscrição fazendo sentido pra essa pessoa nesse momento (ex.: entender a forma de ingresso do curso que ela está vendo, se inscrever se já estiver aberto, ou receber aviso se as inscrições ainda não abriram) — nunca repita algo que já está óbvio ou já apareceu na própria página. followUpSuggestions são os caminhos secundários que ajudam a decidir ou avançar. A pessoa nunca deve terminar a leitura sem saber qual é o próximo passo prático para se inscrever.
 11. Se o pedido estiver fora do escopo do Vestibular FGV, use warning e ofereça caminhos de cursos, formas de ingresso, bolsas, eventos ou provas.
@@ -1327,7 +1336,7 @@ ${JSON.stringify(dataCatalog)}`;
         instructions,
         input: message,
         store: false,
-        temperature: 0.25,
+        temperature: 0.6,
         stream: true,
         text: { format: { type: "json_schema", name: "fgv_generative_ui_v2", strict: true, schema: RESPONSE_SCHEMA } }
       })

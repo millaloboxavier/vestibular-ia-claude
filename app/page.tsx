@@ -42,12 +42,6 @@ function upcomingAdmissionNotice(): string | null {
   return `Processo seletivo ${cycle}— inscrições a partir de ${day}/${month}.`;
 }
 
-const loadingSteps = [
-  "Entendendo o que você procura",
-  "Identificando curso, cidade e forma de ingresso",
-  "Organizando os blocos mais úteis para este momento",
-];
-
 type Plan = {
   pageTitle?: string;
   chatMessage?: string;
@@ -165,6 +159,12 @@ function normalize(text = "") {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .trim();
+}
+
+function renderChatText(text: string) {
+  return text.split(/(\*\*[^*]+\*\*)/g).map((part, index) =>
+    part.startsWith("**") && part.endsWith("**") ? <strong key={index}>{part.slice(2, -2)}</strong> : part
+  );
 }
 
 function detectChecklistStep(normalizedMessage: string): ChecklistStepId | null {
@@ -1049,7 +1049,7 @@ export default function Page() {
             </>
           )}
 
-          <form onSubmit={onSubmit} className="mt-10 flex w-full max-w-2xl gap-2 rounded-full border bg-muted p-2">
+          <form onSubmit={onSubmit} className="mt-10 flex w-full max-w-2xl gap-2 rounded-2xl border bg-muted p-2">
             <Input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Faça uma pergunta" className="border-0 bg-transparent focus:bg-transparent focus:ring-0" />
             <Button type="submit" size="icon" disabled={!input.trim() || loading} aria-label="Buscar"><ArrowUp className="h-5 w-5" /></Button>
           </form>
@@ -1090,7 +1090,7 @@ export default function Page() {
                       <button
                         type="button"
                         onClick={() => restoreJourney(item)}
-                        className={`ml-auto block max-w-[85%] rounded-2xl px-4 py-2.5 text-left text-sm font-medium transition ${active ? "bg-foreground text-background" : "bg-muted hover:bg-muted/70"}`}
+                        className={`ml-auto block max-w-[85%] rounded-2xl px-4 py-2.5 text-left text-sm font-medium transition ${active ? "bg-[hsl(40,6%,72%)] text-foreground" : "bg-muted hover:bg-muted/70"}`}
                       >
                         {item.question}
                       </button>
@@ -1100,7 +1100,7 @@ export default function Page() {
                           onClick={() => restoreJourney(item)}
                           className="block w-full whitespace-pre-line text-left text-base leading-7 text-foreground"
                         >
-                          {item.plan.chatMessage}
+                          {renderChatText(item.plan.chatMessage)}
                         </button>
                       ) : null}
                     </div>
@@ -1108,9 +1108,9 @@ export default function Page() {
                 })}
                 {loading ? (
                   <div className="space-y-1.5">
-                    <div className="ml-auto block max-w-[85%] rounded-2xl bg-foreground px-4 py-2.5 text-sm font-medium text-background">{currentQuestion}</div>
+                    <div className="ml-auto block max-w-[85%] rounded-2xl bg-[hsl(40,6%,72%)] px-4 py-2.5 text-sm font-medium text-foreground">{currentQuestion}</div>
                     {streamingPreview?.chatMessage ? (
-                      <p className="whitespace-pre-line text-base leading-7 text-foreground">{streamingPreview.chatMessage}</p>
+                      <p className="whitespace-pre-line text-base leading-7 text-foreground">{renderChatText(streamingPreview.chatMessage)}</p>
                     ) : (
                       <p className="flex items-center gap-1 text-base text-foreground">Pensando<TypingDots /></p>
                     )}
@@ -1119,10 +1119,13 @@ export default function Page() {
                 <div ref={chatEndRef} />
               </div>
 
-              <form onSubmit={onSubmit} className="mx-4 mb-4 flex shrink-0 gap-2 rounded-full border bg-muted p-2 md:mx-0 md:mb-0">
+              <form onSubmit={onSubmit} className="mx-4 flex shrink-0 gap-2 rounded-2xl border bg-muted p-2 md:mx-0">
                 <Input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Pergunte outra coisa sobre a graduação FGV..." className="border-0 bg-transparent focus:bg-transparent focus:ring-0" />
                 <Button type="submit" size="icon" disabled={!input.trim() || loading} aria-label="Enviar"><ArrowUp className="h-5 w-5" /></Button>
               </form>
+              <p className="mx-4 mb-4 shrink-0 text-center text-[0.7rem] leading-4 text-muted-foreground md:mx-0 md:mb-0 md:text-left">
+                Respostas geradas por IA podem conter erros — confirme informações importantes antes de decidir.
+              </p>
             </div>
 
             {/* Canvas: rola de forma independente, acima do dock no mobile */}
@@ -1144,19 +1147,9 @@ export default function Page() {
 
               {loading ? (
                 <>
-                  <div className="rounded-[1.5rem] border p-5 md:p-6">
-                    <div className="flex items-center gap-3 font-medium">
-                      <Loader2 className="h-5 w-5 animate-spin" />
-                      {streamingPreview?.pageTitle || "Montando sua experiência"}<TypingDots />
-                    </div>
-                    <div className="mt-5 grid gap-3">
-                      {loadingSteps.map((step, index) => (
-                        <div key={step} className="flex items-center gap-3 rounded-2xl bg-muted/50 p-3 text-sm text-muted-foreground">
-                          <span className="flex h-6 w-6 items-center justify-center rounded-full border text-xs">{index + 1}</span>
-                          {step}
-                        </div>
-                      ))}
-                    </div>
+                  <div className="flex items-center gap-3 font-medium text-muted-foreground">
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    {streamingPreview?.pageTitle || "Montando sua experiência"}<TypingDots />
                   </div>
                   <GenerativeSkeleton variant={skeletonVariant} />
                 </>
