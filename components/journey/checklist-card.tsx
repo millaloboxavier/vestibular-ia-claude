@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, Circle } from "lucide-react";
+import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type ChecklistStepId = "formaIngresso" | "edital" | "provasAntigas" | "locaisProva" | "inscricao";
@@ -40,24 +40,31 @@ export function ChecklistCard({ checklist }: { checklist: JourneyChecklist }) {
     <div className="mb-6 rounded-2xl border bg-muted/30 p-4 md:p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
-          Próximos passos recomendados · {checklist.confirmedCourseName}
+          Próximos passos · {checklist.confirmedCourseName}
         </p>
         <span className="text-xs text-muted-foreground">{doneCount}/{CHECKLIST_STEP_ORDER.length}</span>
       </div>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {CHECKLIST_STEP_ORDER.map((step) => {
+      <div className="mt-4 flex items-start">
+        {CHECKLIST_STEP_ORDER.map((step, index) => {
           const done = checklist.steps[step.id];
+          const isLast = index === CHECKLIST_STEP_ORDER.length - 1;
           return (
-            <span
-              key={step.id}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium",
-                done ? "border-foreground/20 bg-foreground text-background" : "text-muted-foreground"
-              )}
-            >
-              {done ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}
-              {step.label}
-            </span>
+            <div key={step.id} className="flex flex-1 flex-col items-center text-center last:flex-none">
+              <div className="flex w-full items-center">
+                <div
+                  className={cn(
+                    "flex h-5 w-5 shrink-0 items-center justify-center rounded-full border",
+                    done ? "border-foreground bg-foreground text-background" : "border-muted-foreground/30 bg-background"
+                  )}
+                >
+                  {done ? <Check className="h-3 w-3" /> : null}
+                </div>
+                {!isLast ? <div className={cn("h-px flex-1", done ? "bg-foreground/40" : "bg-muted-foreground/20")} /> : null}
+              </div>
+              <p className={cn("mt-1.5 max-w-[4.5rem] text-[0.65rem] leading-tight", done ? "font-medium text-foreground" : "text-muted-foreground")}>
+                {step.label}
+              </p>
+            </div>
           );
         })}
       </div>

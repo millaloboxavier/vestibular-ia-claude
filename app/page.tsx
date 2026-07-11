@@ -6,7 +6,7 @@ import { ArrowUp, Bell, ChevronDown, Download, Loader2, Menu, MessageCircle, Spa
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { GenerativeSkeleton, Section, SectionRenderer, SkeletonVariant } from "@/components/generative/section-renderer";
-import { ChecklistCard, ChecklistStepId, JourneyChecklist, createChecklist, isChecklistComplete } from "@/components/journey/checklist-card";
+import { ChecklistStepId, JourneyChecklist, createChecklist, isChecklistComplete } from "@/components/journey/checklist-card";
 import siteData from "@/data/graduacao-content.json";
 
 const suggestions = [
@@ -820,6 +820,36 @@ export default function Page() {
     restoreJourney(item);
   }
 
+  function resumeJourney() {
+    if (!checklist) return;
+    const name = checklist.confirmedCourseName;
+    const lastRelevant =
+      journeys.find((entry) => entry.plan?.sections?.some((section) => section.type === "course_detail")) || journeys[0];
+
+    // Passos obrigatórios da inscrição de verdade: curso (já feito), forma de ingresso e a
+    // inscrição em si. Edital, provas antigas e local de prova são sugestões pra se informar,
+    // não etapas bloqueantes — nem fazem sentido antes de a pessoa saber a forma de ingresso.
+    const missingCore: string[] = [];
+    if (!checklist.steps.formaIngresso) missingCore.push("escolher a forma de ingresso");
+    if (!checklist.steps.inscricao) missingCore.push("se inscrever");
+    const corePart = missingCore.length
+      ? `Ainda falta ${missingCore.join(" e ")} para concluir sua inscrição.`
+      : "Você já passou pelos passos principais até a inscrição.";
+
+    const chatMessage = `Bem-vinda de volta! Você já escolheu **${name}** como sua opção. ${corePart}\n\nSe quiser, também pode consultar o edital, provas anteriores ou locais de prova.\n\nQuer que eu te ajude com algum desses agora?`;
+
+    const item: JourneyItem = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      question: "Continuar de onde parei",
+      title: `Retomando ${name}`,
+      intent: "retomada",
+      createdAt: compactDateLabel(),
+      plan: lastRelevant?.plan ? { ...lastRelevant.plan, chatMessage } : { pageTitle: name, chatMessage, sections: [] },
+    };
+    setJourneys((previous) => [item, ...previous].slice(0, 12));
+    restoreJourney(item);
+  }
+
   async function submitQuestion(question: string) {
     const message = question.trim();
     if (!message || loading) return;
@@ -1016,43 +1046,25 @@ export default function Page() {
             <Sparkles className="h-7 w-7" />
           </div>
 
-          {checklist && !isChecklistComplete(checklist) ? (
-            <>
-              <p className="mb-4 rounded-full border bg-muted px-4 py-1.5 text-sm font-medium text-muted-foreground">Bem-vinda de volta</p>
-              <h1 className="max-w-3xl text-3xl font-semibold tracking-tight md:text-5xl">Continuando sua jornada em {checklist.confirmedCourseName}</h1>
-              <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground md:text-lg">
-                Você já escolheu esse curso como sua opção. Veja abaixo o que já foi feito e o que vem a seguir, rumo à inscrição.
-              </p>
-              <div className="mt-6 w-full max-w-2xl text-left">
-                <ChecklistCard checklist={checklist} />
-              </div>
-              <div className="mt-2 flex flex-wrap justify-center gap-2">
-                <Button
-                  onClick={() =>
-                    submitQuestion(
-                      `quais formas de ingresso existem para ${checklist.confirmedCourseName}${checklist.confirmedCourseCity ? ` em ${checklist.confirmedCourseCity}` : ""}?`
-                    )
-                  }
-                >
-                  Continuar de onde parei
-                </Button>
-                <Button variant="outline" onClick={() => saveChecklist(null)}>Começar algo novo</Button>
-              </div>
-            </>
-          ) : (
-            <>
-              {admissionNotice ? (
-                <p className="mb-4 rounded-full border bg-muted px-4 py-1.5 text-sm font-medium text-muted-foreground">{admissionNotice}</p>
-              ) : null}
-              <h1 className="max-w-3xl text-3xl font-semibold tracking-tight md:text-5xl">O que você deseja saber sobre a Graduação FGV?</h1>
-              <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground md:text-lg">Pergunte sobre cursos, formas de ingresso, provas e prepare-se para se tornar um GVniano.</p>
-            </>
-          )}
+          {admissionNotice ? (
+            <p className="mb-4 rounded-full border bg-muted px-4 py-1.5 text-sm font-medium text-muted-foreground">{admissionNotice}</p>
+          ) : null}
+          <h1 className="max-w-3xl text-3xl font-semibold tracking-tight md:text-5xl">O que você deseja saber sobre a Graduação FGV?</h1>
+          <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground md:text-lg">Pergunte sobre cursos, formas de ingresso, provas e prepare-se para se tornar um GVniano.</p>
 
           <form onSubmit={onSubmit} className="mt-10 flex w-full max-w-2xl gap-2 rounded-2xl border bg-muted p-2">
             <Input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Faça uma pergunta" className="border-0 bg-transparent focus:bg-transparent focus:ring-0" />
             <Button type="submit" size="icon" disabled={!input.trim() || loading} aria-label="Buscar"><ArrowUp className="h-5 w-5" /></Button>
           </form>
+          {checklist && !isChecklistComplete(checklist) ? (
+            <button
+              type="button"
+              onClick={resumeJourney}
+              className="mt-4 rounded-full border bg-muted px-4 py-1.5 text-sm font-medium text-muted-foreground transition hover:bg-muted/70"
+            >
+              👋 Você estava vendo {checklist.confirmedCourseName} — continuar?
+            </button>
+          ) : null}
           <div className="mt-6 flex max-w-3xl flex-wrap justify-center gap-2">
             {suggestions.map((suggestion) => <Button key={suggestion} variant="outline" size="sm" onClick={() => submitQuestion(suggestion)}>{suggestion}</Button>)}
           </div>
@@ -1142,8 +1154,6 @@ export default function Page() {
                   </Button>
                 ) : null}
               </div>
-
-              {checklist ? <ChecklistCard checklist={checklist} /> : null}
 
               {loading ? (
                 <>
